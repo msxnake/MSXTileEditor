@@ -1,7 +1,8 @@
 //--------------version 0.01--------------------
 //data: Diumenge, 11 de Maig de 2025
 //---(c)----Jordi Sala---------------------------
-package com.example.msxtileeditor // Assegura't que aquest és el teu paquet
+package com.example.msxtileeditor
+
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity

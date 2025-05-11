@@ -1,9 +1,9 @@
-//--------------version 0.02--------------------
+//--------------version 0.05--------------------
 //data: Diumenge, 11 de Maig de 2025
 //---(c)----Jordi Sala---------------------------
-@file:OptIn(ExperimentalMaterial3Api::class) // <--- AFEGEIX AQUESTA LÍNIA AQUÍ
+@file:OptIn(ExperimentalMaterial3Api::class) // Ja no necessitem ExperimentalLayoutApi aquí
 
-package com.example.msxtileeditor // Assegura't que aquest és el teu paquet
+package com.example.msxtileeditor
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -13,44 +13,47 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material3.* // Aquesta importació ja inclou ExperimentalMaterial3Api si calgués individualment
+import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 
-// Colors per defecte per als píxels (podem fer-los configurables més endavant)
-val PIXEL_ON_COLOR = Color.Black
-val PIXEL_OFF_COLOR = Color.White
-val GRID_LINE_COLOR = Color.LightGray
+val GRID_LINE_COLOR = Color.DarkGray
+val EDITOR_BACKGROUND_COLOR = Color.LightGray
+val NON_CONFORMANT_PIXEL_OVERLAY_COLOR = Color.Red.copy(alpha = 0.3f) // Color per superposar als píxels no conformants
 
-/**
- * Composable principal que organitza la pantalla de l'editor de tiles.
- * Mostra la llista de tiles, l'editor del tile seleccionat i controls addicionals.
- * @param editorViewModel El ViewModel que gestiona l'estat de l'editor.
- */
 @Composable
 fun TileEditorScreen(editorViewModel: TileEditorViewModel = viewModel()) {
-    // Recull l'estat del ViewModel per a què Compose reaccioni als canvis.
     val tiles = editorViewModel.tiles
     val selectedTileIndex = editorViewModel.selectedTileIndex
     val selectedTile = editorViewModel.selectedTile
+    val selectedDrawingColorIndex = editorViewModel.selectedColorIndex
 
     Scaffold(
         topBar = {
-            TopAppBar( // Aquesta és una de les APIs que pot ser experimental
-                title = { Text("Editor de Tiles MSX") },
+            TopAppBar(
+                title = { Text("Editor de Tiles MSX v0.05") }, // Actualitzem versió al títol
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.primaryContainer,
                     titleContentColor = MaterialTheme.colorScheme.primary
@@ -58,92 +61,145 @@ fun TileEditorScreen(editorViewModel: TileEditorViewModel = viewModel()) {
             )
         },
         floatingActionButton = {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FloatingActionButton(onClick = { editorViewModel.addNewTile() }) { // Aquesta també
+            Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                FloatingActionButton(onClick = { editorViewModel.addNewTile() }) {
                     Icon(Icons.Filled.Add, "Afegir nou tile")
                 }
                 FloatingActionButton(onClick = { editorViewModel.deleteSelectedTile() }) {
                     Icon(Icons.Filled.Delete, "Eliminar tile seleccionat")
                 }
+                if (selectedTile != null) {
+                    FloatingActionButton(
+                        onClick = { editorViewModel.conformSelectedTileToDesignatedRowColors() },
+                        containerColor = MaterialTheme.colorScheme.tertiaryContainer
+                    ) {
+                        Icon(Icons.Filled.Check, "Conformar Tile a 2 colors/fila")
+                    }
+                }
             }
         }
     ) { paddingValues ->
-        Column(
+        Row(
             modifier = Modifier
                 .padding(paddingValues)
-                .padding(16.dp) // Marge general
-                .fillMaxSize(),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(16.dp) // Espai entre elements
+                .fillMaxSize()
         ) {
-            // Secció per seleccionar un tile de la llista
-            Text("Tiles:", style = MaterialTheme.typography.titleMedium)
-            TileSelector(
-                tiles = tiles,
-                selectedTileIndex = selectedTileIndex,
-                onTileSelected = { index -> editorViewModel.selectTile(index) }
+            ColorPaletteSidebar(
+                selectedColorIndex = selectedDrawingColorIndex,
+                onColorSelected = { colorIndex -> editorViewModel.selectDrawingColor(colorIndex) },
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .padding(start = 8.dp, top = 8.dp, bottom = 8.dp, end = 4.dp)
             )
 
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // Secció per editar el tile seleccionat
-            if (selectedTile != null) {
-                Text("Editor (Tile ${selectedTileIndex + 1}):", style = MaterialTheme.typography.titleMedium)
-                EditableTileView(
-                    tileData = selectedTile,
-                    onPixelToggle = { row, col ->
-                        editorViewModel.togglePixel(row, col)
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth(0.8f) // Ocupa el 80% de l'amplada
-                        .aspectRatio(1f) // Manté la proporció quadrada
-                        .border(1.dp, GRID_LINE_COLOR)
+            Column(
+                modifier = Modifier
+                    .padding(start = 4.dp, top = 8.dp, bottom = 8.dp, end = 8.dp)
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState()),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(16.dp) // Augmentem una mica l'espaiat
+            ) {
+                Text("Tiles:", style = MaterialTheme.typography.titleMedium)
+                TileSelector(
+                    tiles = tiles,
+                    selectedTileIndex = selectedTileIndex,
+                    onTileSelected = { index -> editorViewModel.selectTile(index) }
                 )
 
-                Spacer(modifier = Modifier.height(16.dp))
+                // Ja no necessitem Spacer aquí perquè l'espaiat de la Column principal ja ho fa
 
-                Text("Previsualització (64x64px):", style = MaterialTheme.typography.titleMedium)
-                TilePreview(
-                    tileData = selectedTile,
-                    pixelSize = 8.dp, // Cada píxel del tile serà de 8dp en la previsualització
-                    modifier = Modifier.size(64.dp) // 8 pixels * 8dp/pixel = 64dp
-                )
+                if (selectedTile != null) {
+                    Text("Editor (Tile ${selectedTileIndex + 1}):", style = MaterialTheme.typography.titleMedium)
+                    EditableTileView( // Passant els paràmetres necessaris
+                        tileData = selectedTile,
+                        currentlySelectedPaletteColorIndex = selectedDrawingColorIndex,
+                        onPixelClicked = { row, col -> editorViewModel.setPixelColor(row, col) },
+                        onDesignatedColorChange = { rowIndex, isFg, newColorIndex ->
+                            editorViewModel.setDesignatedRowColor(rowIndex, isFg, newColorIndex)
+                        },
+                        modifier = Modifier.fillMaxWidth(0.95f) // Ajustem amplada
+                    )
 
-            } else {
-                Text("No hi ha cap tile seleccionat o la llista és buida.")
+                    // Ja no necessitem el DesignatedRowColorsEditor separat
+                    // ni el text que l'anunciava.
+
+                    Text("Previsualització (64x64px):", style = MaterialTheme.typography.titleMedium)
+                    TilePreview(
+                        tileData = selectedTile,
+                        modifier = Modifier.size(64.dp)
+                    )
+
+                } else {
+                    Text("No hi ha cap tile seleccionat o la llista és buida.")
+                }
             }
         }
     }
 }
 
-/**
- * Mostra una fila de previsualitzacions de tiles per a la selecció.
- * @param tiles La llista de TileData a mostrar.
- * @param selectedTileIndex L'índex del tile actualment seleccionat.
- * @param onTileSelected Lambda que es crida quan un tile és seleccionat.
- */
 @Composable
-fun TileSelector(
-    tiles: List<TileData>,
-    selectedTileIndex: Int,
-    onTileSelected: (Int) -> Unit
+fun ColorPaletteSidebar( /* ... (sense canvis respecte v0.04) ... */
+                         selectedColorIndex: Int,
+                         onColorSelected: (Int) -> Unit,
+                         modifier: Modifier = Modifier
 ) {
-    LazyRow( // Permet scroll horitzontal si hi ha molts tiles
+    Card(
+        modifier = modifier.width(IntrinsicSize.Min),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .padding(vertical = 8.dp, horizontal = 4.dp)
+                .fillMaxHeight()
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterVertically),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            MSXColorPalette.colors.forEachIndexed { index, color ->
+                val itemSize = 32.dp
+                val borderColor = if (index == selectedColorIndex) MaterialTheme.colorScheme.outline else Color.Transparent
+                val displayColor = if (color == Color.Transparent) EDITOR_BACKGROUND_COLOR else color // Mostra EDITOR_BACKGROUND_COLOR per transparent
+
+                Box(
+                    modifier = Modifier
+                        .size(itemSize)
+                        .clip(CircleShape)
+                        .background(displayColor)
+                        .border(2.dp, borderColor, CircleShape)
+                        .clickable { onColorSelected(index) }
+                ) {
+                    if (color == Color.Transparent) { // Si el color de la paleta ÉS transparent
+                        Text("T", Modifier.align(Alignment.Center), color = GRID_LINE_COLOR, fontSize = 12.sp)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun TileSelector( /* ... (sense canvis respecte v0.04) ... */
+                  tiles: List<TileData>,
+                  selectedTileIndex: Int,
+                  onTileSelected: (Int) -> Unit
+) {
+    LazyRow(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth()
     ) {
         itemsIndexed(tiles) { index, tile ->
-            val borderColor = if (index == selectedTileIndex) MaterialTheme.colorScheme.primary else Color.Transparent
+            val borderColor = if (index == selectedTileIndex) MaterialTheme.colorScheme.primary else Color.Gray
             Box(
                 modifier = Modifier
-                    .size(68.dp) // Mida una mica més gran per al border
-                    .border(2.dp, borderColor)
-                    .padding(2.dp) // Padding intern per a què el TilePreview no toqui el border
+                    .size(68.dp)
+                    .border(2.dp, borderColor, RoundedCornerShape(4.dp))
+                    .padding(2.dp)
                     .clickable { onTileSelected(index) }
             ) {
                 TilePreview(
                     tileData = tile,
-                    pixelSize = (64.dp / TILE_SIZE), // Ajusta la mida del píxel per encaixar
                     modifier = Modifier.fillMaxSize()
                 )
             }
@@ -152,107 +208,199 @@ fun TileSelector(
 }
 
 /**
- * Composable que mostra un tile de forma editable.
- * Permet a l'usuari fer clic als píxels per canviar el seu estat.
- * @param tileData Les dades del tile a mostrar i editar.
- * @param onPixelToggle Lambda que es crida quan un píxel és clicat, passant la fila i columna.
- * @param modifier Modificador per personalitzar l'aparença i comportament.
+ * Un petit quadre de color clicable, usat per als selectors FG/BG de cada fila.
+ */
+@Composable
+fun ColorSwatch(colorIndex: Int, size: Dp, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val color = MSXColorPalette.colors.getOrElse(colorIndex) { Color.Magenta }
+    val displayColor = if (color == Color.Transparent) EDITOR_BACKGROUND_COLOR else color
+    Box(
+        modifier = modifier // Permet passar modificadors externs
+            .size(size)
+            .clip(RoundedCornerShape(4.dp))
+            .background(displayColor)
+            .border(1.dp, GRID_LINE_COLOR, RoundedCornerShape(4.dp))
+            .clickable(onClick = onClick)
+    ) {
+        if (color == Color.Transparent) {
+            Text(
+                "T",
+                Modifier.align(Alignment.Center),
+                color = GRID_LINE_COLOR,
+                fontSize = (size.value / 2.2).sp, // Ajusta mida de la T
+                textAlign = TextAlign.Center
+            )
+        }
+    }
+}
+
+/**
+ * Nou Composable per a una cel·la de píxel individual dins de l'editor.
+ */
+@Composable
+fun PixelCell(
+    pixelColorIndex: Int,
+    isNonConformant: Boolean,
+    modifier: Modifier = Modifier // Per al .weight() i .aspectRatio()
+) {
+    val pixelColor = MSXColorPalette.colors.getOrElse(pixelColorIndex) { MSXColorPalette.colors[1] } // Negre per defecte si l'índex és invàlid
+    val displayPixelColor = if(pixelColor == Color.Transparent) EDITOR_BACKGROUND_COLOR else pixelColor
+
+    Box(
+        modifier = modifier
+            .background(displayPixelColor) // Color base del píxel (o fons si és transparent)
+            .border(0.5.dp, GRID_LINE_COLOR.copy(alpha = 0.3f)) // Línia de graella fina
+    ) {
+        if (isNonConformant) {
+            // Superposició per indicar que no és conformant
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(NON_CONFORMANT_PIXEL_OVERLAY_COLOR)
+            )
+        }
+    }
+}
+
+/**
+ * Vista de tile editable, ara amb selectors de color FG/BG integrats per cada fila.
  */
 @Composable
 fun EditableTileView(
     tileData: TileData,
-    onPixelToggle: (row: Int, col: Int) -> Unit,
+    currentlySelectedPaletteColorIndex: Int, // Per assignar als selectors FG/BG de fila
+    onPixelClicked: (row: Int, col: Int) -> Unit,
+    onDesignatedColorChange: (rowIndex: Int, isForegroundColor: Boolean, newColorIndex: Int) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Canvas(modifier = modifier
-        .pointerInput(tileData) { // Important re-executar el pointerInput si tileData canvia
-            detectTapGestures { offset ->
-                // Calculem la mida de cada cel·la del grid
-                val cellSizePx = size.width / TILE_SIZE.toFloat()
-                // Calculem la fila i columna clicada a partir de la posició del clic (offset)
-                val col = (offset.x / cellSizePx).toInt().coerceIn(0, TILE_SIZE - 1)
-                val row = (offset.y / cellSizePx).toInt().coerceIn(0, TILE_SIZE - 1)
-                onPixelToggle(row, col)
+    Column(
+        modifier = modifier.border(1.dp, GRID_LINE_COLOR.copy(alpha=0.7f)), // Contorn general
+        verticalArrangement = Arrangement.spacedBy(0.dp) // Sense espai vertical entre les files internes
+    ) {
+        tileData.pixels.forEachIndexed { rowIndex, pixelRowList ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(IntrinsicSize.Min), // Alçada basada en el contingut més alt
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Editor de píxels per a aquesta fila (8 cel·les)
+                Row(
+                    modifier = Modifier
+                        .weight(1f) // Ocupa l'espai principal
+                        .aspectRatio(8f/1f) // Proporció 8:1 per als 8 píxels
+                    // Si l'alçada total de la fila del tile editor es fixa (ex: 32.dp),
+                    // llavors l'aspectRatio aquí no és estrictament necessari o
+                    // s'ha de coordinar amb l'alçada del ColorSwatch.
+                    // Per ara, deixem que l'alçada de la fila es determini
+                    // per l'alçada dels ColorSwatch més grans (24.dp + padding).
+                ) {
+                    pixelRowList.forEachIndexed { colIndex, currentPixelColorIndex ->
+                        val (designatedFg, designatedBg) = tileData.designatedRowColors[rowIndex]
+                        val isNonConformant = currentPixelColorIndex != designatedFg && currentPixelColorIndex != designatedBg
+
+                        PixelCell(
+                            pixelColorIndex = currentPixelColorIndex,
+                            isNonConformant = isNonConformant,
+                            modifier = Modifier
+                                .weight(1f) // Cada cel·la de píxel té la mateixa amplada
+                                .fillMaxHeight() // Ocupa tota l'alçada disponible a la seva fila
+                                .clickable { onPixelClicked(rowIndex, colIndex) }
+                        )
+                    }
+                }
+
+                // Separador visual
+                Spacer(modifier = Modifier.width(8.dp))
+
+                // Selectors de color designat (FG/BG) per a aquesta fila
+                val swatchSize = 24.dp // Mida dels selectors de color FG/BG
+                ColorSwatch(
+                    colorIndex = tileData.designatedRowColors[rowIndex].first, // FG
+                    size = swatchSize,
+                    onClick = {
+                        onDesignatedColorChange(rowIndex, true, currentlySelectedPaletteColorIndex)
+                    },
+                    modifier = Modifier.align(Alignment.CenterVertically) // Assegura alineació
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                ColorSwatch(
+                    colorIndex = tileData.designatedRowColors[rowIndex].second, // BG
+                    size = swatchSize,
+                    onClick = {
+                        onDesignatedColorChange(rowIndex, false, currentlySelectedPaletteColorIndex)
+                    },
+                    modifier = Modifier.align(Alignment.CenterVertically)
+                )
+                Spacer(modifier = Modifier.width(4.dp)) // Petit espai al final de la fila
+            }
+            if (rowIndex < TILE_SIZE - 1) {
+                // Línia divisòria horitzontal entre les files de l'editor
+                Divider(color = GRID_LINE_COLOR.copy(alpha=0.5f), thickness = 0.5.dp)
             }
         }
-    ) {
-        // Dibuixa el tile utilitzant la funció compartida drawTileContent
-        drawTileContent(tileData, PIXEL_ON_COLOR, PIXEL_OFF_COLOR, GRID_LINE_COLOR)
     }
 }
 
-/**
- * Composable que mostra una previsualització estàtica d'un tile.
- * @param tileData Les dades del tile a mostrar.
- * @param pixelSize La mida en Dp de cada píxel del tile en aquesta previsualització.
- * @param modifier Modificador per personalitzar l'aparença i comportament.
- */
+
 @Composable
-fun TilePreview(
-    tileData: TileData,
-    pixelSize: Dp, // Mida de cada píxel en la previsualització
-    modifier: Modifier = Modifier
+fun TilePreview( /* ... (sense canvis respecte v0.04) ... */
+                 tileData: TileData,
+                 modifier: Modifier = Modifier
 ) {
-    // Convertim Dp a píxels per al Canvas, però el Canvas en si es dimensiona amb Dp
-    // La lògica de dibuix dins de 'drawTileContent' treballarà amb les dimensions reals del Canvas.
-    Canvas(modifier = modifier.border(1.dp, GRID_LINE_COLOR)) {
-        // Dibuixa el tile utilitzant la funció compartida drawTileContent
-        // Per a la previsualització, no dibuixem les línies de la graella interna per claredat.
-        drawTileContent(tileData, PIXEL_ON_COLOR, PIXEL_OFF_COLOR, Color.Transparent)
+    Canvas(modifier = modifier
+        .background(EDITOR_BACKGROUND_COLOR)
+        .border(1.dp, GRID_LINE_COLOR)
+    ) {
+        drawTileContent(tileData, drawGridLines = false, showNonConformantMarkers = false)
     }
 }
 
-
-/**
- * Funció d'extensió de DrawScope per dibuixar el contingut d'un tile (píxels i graella).
- * Aquesta funció es pot reutilitzar tant per l'editor com per la previsualització.
- * @param tileData Les dades del tile a dibuixar.
- * @param onColor El color per als píxels actius.
- * @param offColor El color per als píxels inactius.
- * @param gridColor El color per a les línies de la graella. Si és Color.Transparent, no es dibuixen.
- */
-fun DrawScope.drawTileContent(
-    tileData: TileData,
-    onColor: Color,
-    offColor: Color,
-    gridColor: Color
+fun DrawScope.drawTileContent( /* ... (sense canvis respecte v0.04, excepte el nom del paràmetre non-conformant) ... */
+                               tileData: TileData,
+                               drawGridLines: Boolean,
+                               showNonConformantMarkers: Boolean
 ) {
     val canvasWidth = size.width
     val canvasHeight = size.height
     val pixelWidth = canvasWidth / TILE_SIZE
     val pixelHeight = canvasHeight / TILE_SIZE
 
-    // Dibuixa cada píxel del tile
     for (row in 0 until TILE_SIZE) {
         for (col in 0 until TILE_SIZE) {
-            val color = if (tileData.pixels[row][col]) onColor else offColor
+            val colorIndex = tileData.pixels[row][col]
+            var pixelColor = MSXColorPalette.colors.getOrElse(colorIndex) { MSXColorPalette.colors[1] }
+
+            // Si el color és transparent, per al dibuix el tractem com el fons de l'editor
+            // Això només és per a la visualització, el valor a TileData segueix sent l'índex transparent
+            if (pixelColor == Color.Transparent){
+                pixelColor = EDITOR_BACKGROUND_COLOR
+            }
+
             drawRect(
-                color = color,
+                color = pixelColor,
                 topLeft = Offset(col * pixelWidth, row * pixelHeight),
                 size = Size(pixelWidth, pixelHeight)
             )
+
+            if (showNonConformantMarkers) {
+                val (fgDesignated, bgDesignated) = tileData.designatedRowColors[row]
+                // Comprovem l'índex original, no el 'pixelColor' modificat per a la visualització de transparents
+                if (tileData.pixels[row][col] != fgDesignated && tileData.pixels[row][col] != bgDesignated) {
+                    drawRect( // Dibuixa una superposició translúcida
+                        color = NON_CONFORMANT_PIXEL_OVERLAY_COLOR,
+                        topLeft = Offset(col * pixelWidth, row * pixelHeight),
+                        size = Size(pixelWidth, pixelHeight)
+                    )
+                }
+            }
         }
     }
 
-    // Dibuixa les línies de la graella si el color de la graella no és transparent
-    if (gridColor != Color.Transparent) {
-        // Línies verticals
+    if (drawGridLines) {
         for (i in 1 until TILE_SIZE) {
-            drawLine(
-                color = gridColor,
-                start = Offset(i * pixelWidth, 0f),
-                end = Offset(i * pixelWidth, canvasHeight),
-                strokeWidth = 1f
-            )
-        }
-        // Línies horitzontals
-        for (i in 1 until TILE_SIZE) {
-            drawLine(
-                color = gridColor,
-                start = Offset(0f, i * pixelHeight),
-                end = Offset(canvasWidth, i * pixelHeight),
-                strokeWidth = 1f
-            )
+            drawLine(GRID_LINE_COLOR, Offset(i * pixelWidth, 0f), Offset(i * pixelWidth, canvasHeight), strokeWidth = 0.5.dp.toPx())
+            drawLine(GRID_LINE_COLOR, Offset(0f, i * pixelHeight), Offset(canvasWidth, i * pixelHeight), strokeWidth = 0.5.dp.toPx())
         }
     }
 }

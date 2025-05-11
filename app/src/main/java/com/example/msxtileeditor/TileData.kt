@@ -1,31 +1,35 @@
-//--------------version 0.01--------------------
+//--------------version 0.04--------------------
 //data: Diumenge, 11 de Maig de 2025
 //---(c)----Jordi Sala---------------------------
-package com.example.msxtileeditor // Assegura't que aquest és el teu paquet
+package com.example.msxtileeditor
+
+import androidx.compose.ui.graphics.Color // Assegura't que Color està importat
 
 // Mida estàndard d'un tile en píxels (MSX sol ser 8x8)
 const val TILE_SIZE = 8
 
 /**
  * Representa les dades d'un tile.
- * Un tile és una matriu de Booleans, on 'true' pot significar píxel actiu (ences)
- * i 'false' píxel inactiu (apagat).
- *
  * @property id Un identificador únic per al tile.
- * @property pixels Una llista mutable de llistes mutables de Booleans que representen la graella de píxels.
- * pixels[fila][columna]
+ * @property pixels Matriu de píxels, cada Int és un índex de la MSXColorPalette.
+ * @property designatedRowColors Llista de parells d'índexs de color (FG, BG) designats per a cada fila.
  */
 data class TileData(
-    val id: String = java.util.UUID.randomUUID().toString(), // Genera un ID únic per defecte
-    val pixels: List<MutableList<Boolean>> = List(TILE_SIZE) { MutableList(TILE_SIZE) { false } }
+    val id: String = java.util.UUID.randomUUID().toString(),
+    val pixels: List<MutableList<Int>> = List(TILE_SIZE) {
+        MutableList(TILE_SIZE) { MSXColorPalette.DEFAULT_PIXEL_COLOR_INDEX }
+    },
+    // Per a cada fila (8 files), un parell d'índexs de color (Foreground, Background)
+    // Índex 1: Negre, Índex 15: Blanc, segons MSXColorPalette
+    val designatedRowColors: MutableList<Pair<Int, Int>> = MutableList(TILE_SIZE) {
+        Pair(1, 15)
+    }
 ) {
-    // Funció per crear una còpia profunda (deep copy) del tile.
-    // Això és important per a la gestió de l'estat en Compose,
-    // per assegurar que les modificacions creen un nou objecte i es detecten els canvis.
     fun deepCopy(): TileData {
-        val newPixels = pixels.map { row ->
-            row.toMutableList() // Crea una nova llista mutable per a cada fila
-        }.toMutableList() // Crea una nova llista mutable de files
-        return TileData(id, newPixels)
+        val newPixels = pixels.map { row -> row.toMutableList() }.toMutableList()
+        // Per a Pair, la còpia per defecte és superficial, però com Int és primitiu, està bé.
+        // Si fossin objectes mutables dins del Pair, necessitaríem una còpia més profunda.
+        val newDesignatedRowColors = designatedRowColors.toMutableList() // Crea una nova llista mutable
+        return TileData(id, newPixels, newDesignatedRowColors)
     }
 }
